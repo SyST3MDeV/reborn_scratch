@@ -9,6 +9,7 @@ edition = "2021"
 minhook = "0.3.0"
 toy-arms = {git = "https://github.com/pseuxide/toy-arms"}
 wchar = "0.11.0"
+widestring = "1.0.2"
 
 [lib]
 crate-type = ["cdylib"]

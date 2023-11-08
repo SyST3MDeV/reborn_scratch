@@ -1,8 +1,10 @@
 use minhook::MinHook;
 
-use std::{string::FromUtf8Error, char, fs::{File, remove_file}, io::{Write, Take}, path::Path, thread::sleep, time::Duration, ptr, mem};
+use std::{string::FromUtf8Error, char, fs::{File, remove_file}, io::{Write, Take, stdout, stdin}, path::Path, thread::sleep, time::Duration, ptr::{self, null}, mem, os::windows::ffi::EncodeWide};
 
 use wchar::{wchar_t, wchz};
+
+use widestring::ucstr;
 
 use toy_arms::{internal::{self, module::Module, GameObject, cast}, derive::GameObject};
 
@@ -11,10 +13,23 @@ internal::create_entrypoint!(main_thread);
 const GNAMES_OFFSET: usize = 0x3515230;
 const GOBJECTS_OFFSET: usize = 0x35152D8;
 const PROCESSEVENT_OFFSET: usize = 0x109ca0;
+const STATICCONSTRUCTOBJECT_OFFSET: usize = 0x008c050;
+const ENGINEPROCESSCOMMAND_OFFSET: usize = 0x01fca00;
+const ERROR_FUNC_OFFSET: usize = 0x00646c0;
 
 static mut orig_processevent_addr: usize = 0;
+static mut orig_staticcreateobject_addr: usize = 0;
+static mut orig_engine_exec_addr: usize = 0;
+static mut orig_error_func_addr: usize = 0;
+
+static mut engine_addr: usize = 0;
+static mut foutputdevice: usize = 0;
+
+static mut did_the_funny: bool = false;
 
 static mut gobjects_global: Vec<UObject> = Vec::new();
+
+static mut gnames_global: Option<*mut TArray> = None;
 
 #[derive(GameObject)]
 struct TArray {
@@ -226,8 +241,8 @@ fn get_uobject_from_vec_by_address(uobject_address: usize, vec: &Vec<UObject>) -
     return None;
 }
 
-unsafe fn fake_process_event(uobject_address: usize, ufunction_address: usize, params: usize){
-    type ProcessEvent = unsafe extern "fastcall" fn(uobject: usize, ufunction: usize, params: usize);
+unsafe fn fake_process_event(uobject_address: usize, ufunction_address: usize, params: usize) -> usize{
+    type ProcessEvent = unsafe extern "fastcall" fn(uobject: usize, ufunction: usize, params: usize) -> usize;
 
     let process_event: ProcessEvent = unsafe { std::mem::transmute(orig_processevent_addr)};
 
@@ -235,19 +250,173 @@ unsafe fn fake_process_event(uobject_address: usize, ufunction_address: usize, p
         let uobject_name = &get_uobject_from_vec_by_address(uobject_address, &gobjects_global).unwrap().name;
         let ufunction_name = &get_uobject_from_vec_by_address(ufunction_address, &gobjects_global).unwrap().name;
 
-        println!("ProcessEvent hook called! UObject {}, UFunction {}, Params addr of {:x}", uobject_name, ufunction_name, params);
+        //println!("ProcessEvent hook called! UObject {}, UFunction {}, Params addr of {:x}", uobject_name, ufunction_name, params);
     }
     else{
         //println!("ProcessEvent hook called, but we failed to lookup the UObject/UFunction! UObject addr of {:x}, UFunction addr of {:x}, Params addr of {:x}", uobject_address, ufunction_address, params);
         
     }
 
-    process_event(uobject_address, ufunction_address, params);
+    return process_event(uobject_address, ufunction_address, params);
     
 
     //println!("Calling the OG ProcessEvent...");
 
    
+
+    
+}
+
+/*
+                    longlong param_1, //UObject, the thing were instantiating
+                    undefined8 param_2, //UObject, the class
+                    undefined8 param_3, //aint never seen this be anything but 0
+                    ulonglong param_4, //Also flags? Either 100000000 or 0
+                   undefined8 param_5, //aint never seen this be anything but 0
+                   undefined8 param_6, //Alawys the same, lets steal this shit
+                   undefined8 param_7, //Flags probably, it's either 0 or FFFFFFFFFF
+                   undefined *param_8, //aint never seen this be anything but 0
+                   undefined4 param_9 //No fucking clue tbh
+                   
+                   UClass*			InClass,
+	UObject*		InOuter,
+	FName			InName,
+	DWORD			InFlags,
+	UObject*		InTemplate,
+	FOutputDevice*	Error,
+	UObject*		SuperObject*/
+
+struct ConsoleCommandParams{
+    command: usize
+}
+
+unsafe fn fake_static_construct_object(param1: usize, param2: usize, param3: usize, param4: usize, param5: usize, param6: usize, param7: usize, param8: usize, param9: usize) -> usize{    
+    type StaticConstructObject = unsafe extern "fastcall" fn(param1: usize, param2: usize, param3: usize, param4: usize, param5: usize, param6: usize, param7: usize, param8: usize, param9: usize) -> usize;
+
+    let static_construct_object: StaticConstructObject = unsafe { std::mem::transmute(orig_staticcreateobject_addr)};
+
+    let called_on_uobject: Option<&UObject> = get_uobject_from_vec_by_address(param1, &gobjects_global);
+    let class_uobject: Option<&UObject> = get_uobject_from_vec_by_address(param2, &gobjects_global);
+    //let outer_uobject: Option<&UObject> = get_uobject_from_vec_by_address(param3, &gobjects_global); //param3 is usually 0
+
+    if(called_on_uobject.is_some() && class_uobject.is_some()){
+        //println!("StaticConstructObject: Base UObject: {}, Class of {}", called_on_uobject.unwrap().name, class_uobject.unwrap().name);
+    }
+    else{
+        //println!("StaticConstructObject with failure to resolve: base: {}, class: {}", called_on_uobject.is_some(), class_uobject.is_some());
+    }
+
+    //println!("param1: {:x}, param2: {:x}, param3: {:x}, param4: {:x}, param5: {:x}, param6: {:x}, param7: {:x}, param8: {:x}, param9: {:x}, ", param1, param2, param3, param4, param5, param6, param7, param8, param9);
+        /*
+        if(!did_the_funny){
+        println!("Doing the funny...");
+
+        did_the_funny = true;
+
+        let uobject_to_instantiate: usize = get_uobject_from_vec("Engine.Console".to_owned(), Some("Core.Class".to_owned()), &gobjects_global).unwrap().address;
+        let parent_uobject: usize = get_uobject_from_vec("PoplarGameEngine.Transient.PoplarGameViewportClient".to_owned(), Some("PoplarGame.PoplarGameViewportClient".to_owned()), &gobjects_global).unwrap().address;
+        
+        //let output: usize = static_construct_object(uobject_to_instantiate, parent_uobject, param3, param4, param5, param6, param7, param8, param9);
+
+        let output: usize = static_construct_object(uobject_to_instantiate, parent_uobject, 0, 0, 0, parent_uobject, 0, 0, param9);
+
+        println!("BEHOLD: THE FUNNY: {:x}", output);
+
+        println!("{}", get_outer_uobject_name(gnames_global.unwrap(), output));
+
+            println!("We bouta do the scuffed funny :)");
+
+            for i in (0x1C0..0x1C8).step_by(0x8){ //1C0 is it!
+                println!("Doing the scuffed funny at {:x}",i);
+
+                let value = (parent_uobject + i) as *const usize;
+
+                if(std::ptr::read::<usize>(value) == 0x0){
+                    let write_value = (parent_uobject + i) as *mut usize;
+
+                    std::ptr::write(write_value, output);
+                }
+            }
+            //[PoplarGame.PoplarPlayerController] PersistentLevel.TheWorld.MenuMap_P.PoplarPlayerController
+
+            /*
+            let test_functions_uobject: &UObject = get_uobject_from_vec("Console.Engine.BuildRuntimeAutoCompleteList".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap();
+
+        println!("Here it goes...");
+
+        let string: &[u16; 12] = wchz!("map Slums_P");
+
+        let command: FString = FString { data: string, count: (string.len() + 1) as u32, max: (string.len() + 1) as u32 };
+
+        let params: ConsoleCommandParams = ConsoleCommandParams{ command: 1 };
+
+            println!("{:x}", ptr::addr_of!(params) as usize);
+
+        fake_process_event(output, test_functions_uobject.address, ptr::addr_of!(params) as usize);
+        */
+
+        }
+        */
+
+        
+
+    //foutputdevice = param6;
+
+    return static_construct_object(param1, param2, param3, param4, param5, param6, param7, param8, param9);
+    
+    //println!("Calling the OG ProcessEvent...");
+}
+
+unsafe fn fake_engine_exec(game_engine_address: usize, command: usize, f_output_device: usize) -> i32{
+    type EngineCallCommand = unsafe extern "thiscall" fn(game_engine_address: usize, command: usize, f_output_device: usize) -> i32;
+
+    let engine_call_command: EngineCallCommand = unsafe{ std::mem::transmute(orig_engine_exec_addr)};
+
+    //println!("Engine exec called: game engine addr of {:x}, wchar_t of {:x}, and f_output_device of {:x}", game_engine_address, command, f_output_device);
+    engine_addr = game_engine_address;
+    foutputdevice = f_output_device;
+
+    return engine_call_command(game_engine_address, command, f_output_device);
+
+    /*
+    if(!did_the_funny){
+        did_the_funny = true;
+
+        let mut new_command = wchz!("start Slums_P");
+
+        return engine_call_command(game_engine_address, ptr::addr_of!(*new_command) as usize, f_output_device);
+
+        //new_command = wchz!("open Cascade_P");
+
+        //return engine_call_command(game_engine_address, ptr::addr_of!(*new_command) as usize, f_output_device);
+    }
+    else{
+        
+    }
+    */
+}
+
+unsafe fn fake_error_func(param_1: usize, param_2: usize) -> usize{
+    type ErrorFunc = unsafe extern "cdecl" fn(param_1: usize, param_2: usize) -> usize;
+
+    let error_func: ErrorFunc = std::mem::transmute(orig_error_func_addr);
+
+    println!("Error func called; param_1: {:x}, param_2: {:x}", param_1, param_2);
+
+    let deciding_value: i32 = ptr::read((param_1) as *const i32);
+
+    if(deciding_value > 0){
+        let return_val: usize = error_func(param_1, param_2);
+
+        println!("Valid, returned {:x}", return_val);
+
+        return return_val;
+    }
+    else{
+        println!("INVALID, returned fake {:x}", param_2);
+
+        return 0;
+    }
 
     
 }
@@ -260,11 +429,6 @@ struct ScuffedTArray{
 }
 
 #[derive(GameObject)]
-struct ConsoleCommandParams{
-    command: &'static [wchar_t]
-}
-
-#[derive(GameObject)]
 struct ReturnToMenuParams{
     reason: usize
 }
@@ -272,9 +436,46 @@ struct ReturnToMenuParams{
 #[derive(GameObject)]
 struct FString{
     data: &'static [wchar_t],
-    count: u16,
-    max: u16
+    count: u32,
+    max: u32
 }
+
+struct NavToURLParams{
+    URL: usize,
+    error: usize,
+    returnval: bool
+}
+
+/*
+[1dbb895e328] [Core.Function] PlayerController.Engine.ClientTravel
+[1dbb895e460] [Core.StrProperty] ClientTravel.PlayerController.Engine.URL
+[1dbb895e538] [Core.ByteProperty] ClientTravel.PlayerController.Engine.TravelType
+[1dbb895e618] [Core.BoolProperty] ClientTravel.PlayerController.Engine.bSeamless
+[1dbb895e6f8] [Core.StructProperty] ClientTravel.PlayerController.Engine.MapPackageGuid */
+
+struct ClientTravelParams{
+    URL: usize,
+    travelType: u8,
+    bSeamless: u64,
+    mapPackageGUID: usize
+}
+
+struct SetFrontendStateParams{
+    state: u8
+}
+
+struct SendPlayerToURLParams{
+    playerController: usize,
+    URL: usize
+}
+
+/*
+[1f7fa569178] [Engine.WorldInfo] PersistentLevel.TheWorld.MenuMap_P.WorldInfo
+
+[1f7f87060e8] [Core.Function] WorldInfo.Engine.ServerTravel
+[1f7f8706220] [Core.StrProperty] ServerTravel.WorldInfo.Engine.URL
+[1f7f87062f8] [Core.BoolProperty] ServerTravel.WorldInfo.Engine.bAbsolute
+[1f7f87063d8] [Core.BoolProperty] ServerTravel.WorldInfo.Engine.bShouldSkipGameNotify */
 
 fn main_thread() {
     println!("ReBorn Injected!");
@@ -286,6 +487,7 @@ fn main_thread() {
     }
     println!("Module valid! Continuing...");
     let module: Module = Module::from_name("Battleborn.exe").unwrap();
+
     let module_base_address: usize = module.base_address;
 
     println!("Module base address: {:x}", module_base_address);
@@ -297,6 +499,8 @@ fn main_thread() {
         println!("Dumping names...");
 
         dump_names(gnames, &module);
+
+        gnames_global = Some(gnames);
 
         println!("Names dump complete!");
 
@@ -324,40 +528,117 @@ fn main_thread() {
 
         orig_processevent_addr = MinHook::create_hook(process_event as _, fake_process_event as _).unwrap() as usize;
 
-        println!("Enabling ProcessEvent hook...");
+        println!("Creating StaticConstructObject reference...");
+
+        type StaticConstructObject = unsafe extern "fastcall" fn(param1: usize, param2: usize, param3: usize, param4: usize, param5: usize, param6: usize, param7: usize, param8: usize, param9: usize);
+
+        let static_construct_object: StaticConstructObject = unsafe{std::mem::transmute(module_base_address + STATICCONSTRUCTOBJECT_OFFSET)};
+
+        println!("Creating StaticConstructObject hook...");
+
+        orig_staticcreateobject_addr = MinHook::create_hook(static_construct_object as _, fake_static_construct_object as _).unwrap() as usize;
+
+        println!("Creating EngineCallCommand reference...");
+
+        type EngineCallCommand = unsafe extern "thiscall" fn(UGameEngine: usize, command: usize, foutputdevice: usize) -> i32;
+
+        let engine_call_command: EngineCallCommand = unsafe{ std::mem::transmute(module_base_address + ENGINEPROCESSCOMMAND_OFFSET)};
+
+        println!("Creating EngineCallCommand hook...");
+
+        orig_engine_exec_addr = MinHook::create_hook(engine_call_command as _, fake_engine_exec as _).unwrap() as usize;
+
+        //type ErrorFunc = unsafe extern "cdecl" fn(param_1: usize, param_2: usize) -> usize;
+
+        //let error_func: ErrorFunc = std::mem::transmute(module_base_address + ERROR_FUNC_OFFSET);
+
+        //orig_error_func_addr = MinHook::create_hook(error_func as _, fake_error_func as _).unwrap() as usize;
+
+        println!("Enabling all hooks...");
 
         let _ = MinHook::enable_all_hooks().unwrap();
 
-        let test_functions_uobject: &UObject = get_uobject_from_vec("PoplarPlayerController.PoplarGame.DebugReturnToMainMenu".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap();
+        //let command: &[u16; 5] = wchz!("exit");
 
-        let test_functions_target_uobject: &UObject = get_uobject_from_vec("PersistentLevel.TheWorld.MenuMap_P.PoplarPlayerController".to_owned(), Some("PoplarGame.PoplarPlayerController".to_owned()), &gobjects_global).unwrap();
+        //[PoplarGame.PoplarGameEngine] Transient.PoplarGameEngine
 
-        println!("Test function UObject address: {:x}", test_functions_uobject.address);
+        /*
 
-        //type ProcessEvent = unsafe extern "cdecl" fn(uobject: usize, ufunction: usize, params: usize);
+        let game_engine_address: usize = get_uobject_from_vec("Transient.PoplarGameEngine".to_owned(), Some("PoplarGame.PoplarGameEngine".to_owned()), &gobjects_global).unwrap().address;
 
-        //let process_event_real: ProcessEvent = unsafe { std::mem::transmute(orig_processevent_addr)};
+        let function_object: usize = get_uobject_from_vec("Engine.Engine.BrowseToURL".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
 
-        println!("Waiting for a few secs to hit menu to call the test function...");
+        let URL = wchz!("Slums_P.umap");
 
-        sleep(Duration::from_secs(10));
+        let URLFString: FString = FString { data: URL, count: (URL.len() + 1) as u32, max: (URL.len() + 1) as u32 };
 
-        println!("Here it goes...");
+        let error = wchz!("GRE GRO GRU GRA GRA GRA");
 
-        let reason = wchz!("Hello Battleborn!");
+        let errorFString: FString = FString { data: error, count: (error.len() + 1) as u32, max: (error.len() + 1) as u32 };
 
-        let fstring: FString = FString { data: reason, count: 0, max: 0 };
+        let params: NavToURLParams = NavToURLParams { URL: ptr::addr_of!(URLFString) as usize, error: ptr::addr_of!(errorFString) as usize, returnval: false };
+        */
 
-        let params: ReturnToMenuParams = ReturnToMenuParams{ reason: ptr::addr_of!(fstring) as usize};
+        //println!("ITS TIME!!!!");
 
-        //println!("{:x}", ptr::addr_of!(params) as usize);
+        //fake_process_event(game_engine_address, function_object, ptr::addr_of!(params) as usize);
 
-        fake_process_event(test_functions_target_uobject.address, test_functions_uobject.address, ptr::addr_of!(params) as usize);
+        /*
+        [2911f8f3368] [Core.Function] Engine.Engine.BrowseToURL
+[2911f8f34a0] [Core.StrProperty] BrowseToURL.Engine.Engine.BrowseURL
+[2911f8f3578] [Core.StrProperty] BrowseToURL.Engine.Engine.Error
+[2911f8f3650] [Core.BoolProperty] BrowseToURL.Engine.Engine.ReturnValue */
+
+        /*
+        [269cbdbbec0] [Core.Function] GameViewportClient.Engine.ConsoleCommand 
+        [269cdbc84f8] [PoplarGame.PoplarGameViewportClient] PoplarGameEngine.Transient.PoplarGameViewportClient*/
 
         //Parms -> TArray<wchar_t> whose pointer points to wchar_t
 
+        let stdin = stdin();
+        let mut stdout = stdout();
+
         loop{
-            
+            /*
+            if(!did_the_funny && engine_addr != 0 && foutputdevice != 0){
+                did_the_funny = true;
+                let command_1 = wchz!("open Wishbone_P");
+                engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
+            }
+            */
+            /*
+            if(engine_addr != 0 && foutputdevice != 0){
+                print!(">");
+
+                let mut command: String = String::new();
+
+                stdout.flush();
+
+                stdin.read_line(&mut command);
+
+                let command_1 = wchz!("open Wishbone_P");
+                let command_2 = wchz!("open 10.0.0.85");
+
+                if(command.contains("1")){
+                    println!("Command 1");
+                    engine_call_command(engine_addr, ptr::addr_of!(command_1) as usize, foutputdevice);
+                }
+                else if(command.contains("2")){
+                    println!("Command 2");
+                    engine_call_command(engine_addr, ptr::addr_of!(command_2) as usize, foutputdevice);
+                }
+                
+            }
+            */
+            /*
+            if(!did_the_funny && foutputdevice != 0){
+                did_the_funny = true;
+                println!("DOING THE THING!!!!!");
+                std::ptr::write((game_engine_address + 0x630) as *mut usize, 0);
+                println!("{:x}", ptr::addr_of!(command) as usize);
+                engine_call_command(game_engine_address, ptr::addr_of!(command) as usize, foutputdevice);
+            }
+            */
         }
     }
 }
