@@ -606,7 +606,6 @@ fn main_thread() {
                 engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
             }
             */
-            /*
             if(engine_addr != 0 && foutputdevice != 0){
                 print!(">");
 
@@ -621,15 +620,14 @@ fn main_thread() {
 
                 if(command.contains("1")){
                     println!("Command 1");
-                    engine_call_command(engine_addr, ptr::addr_of!(command_1) as usize, foutputdevice);
+                    engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
                 }
                 else if(command.contains("2")){
                     println!("Command 2");
-                    engine_call_command(engine_addr, ptr::addr_of!(command_2) as usize, foutputdevice);
+                    engine_call_command(engine_addr, ptr::addr_of!(*command_2) as usize, foutputdevice);
                 }
                 
             }
-            */
             /*
             if(!did_the_funny && foutputdevice != 0){
                 did_the_funny = true;
