@@ -1,12 +1,12 @@
 use minhook::MinHook;
 
-use std::{string::FromUtf8Error, char, fs::{File, remove_file}, io::{Write, Take, stdout, stdin}, path::Path, thread::sleep, time::Duration, ptr::{self, null}, mem, os::windows::ffi::EncodeWide};
+use std::{string::FromUtf8Error, char, fs::{File, remove_file}, io::{Write, Take, stdout, stdin, Read}, path::Path, thread::sleep, time::Duration, ptr::{self, null}, mem, os::windows::ffi::EncodeWide};
 
 use wchar::{wchar_t, wchz};
 
-use widestring::ucstr;
+use widestring::{ucstr, U16CStr};
 
-use toy_arms::{internal::{self, module::Module, GameObject, cast}, derive::GameObject};
+use toy_arms::{internal::{self, module::Module, GameObject, cast}, derive::GameObject, utils::{detect_keydown, keyboard::VirtualKeyCode}};
 
 internal::create_entrypoint!(main_thread);
 
@@ -151,6 +151,7 @@ unsafe fn dump_names(gnames: *mut TArray, module: &Module){
         i = i + 1;
     }
 
+    /*
     if(Path::new("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\NamesDump.txt").exists()){
         remove_file("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\NamesDump.txt");
     }
@@ -158,8 +159,15 @@ unsafe fn dump_names(gnames: *mut TArray, module: &Module){
     let mut File: File = File::create("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\NamesDump.txt").unwrap();
 
     File.write_all(names_string.as_bytes());
+    */
 
 }
+
+/*
+[26b6be7c1a0] [Core.Function] PoplarPlayerController.PoplarGame.ServerSelectCharacter
+[26b6be7c2d8] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.SelectedCharacter
+[26b6be7c3b8] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.PreferredSkin
+[26b6be7c498] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.PreferredTaunt */
 
 unsafe fn dump_objects(gnames: *mut TArray, module: &Module, gobjects: *mut TArray) -> Vec<UObject>{
     let mut uobjects: Vec<UObject> = Vec::new();
@@ -199,6 +207,8 @@ unsafe fn dump_objects(gnames: *mut TArray, module: &Module, gobjects: *mut TArr
         i = i + 1;
     }
 
+    /*
+
     if(Path::new("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\ObjectsDump.txt").exists()){
         remove_file("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\ObjectsDump.txt");
     }
@@ -206,6 +216,7 @@ unsafe fn dump_objects(gnames: *mut TArray, module: &Module, gobjects: *mut TArr
     let mut File: File = File::create("C:\\Users\\gregorym\\Documents\\ReBorn\\ReBorn\\ObjectsDump.txt").unwrap();
 
     File.write_all(names_string.as_bytes());
+    */
 
     return uobjects;
 }
@@ -246,16 +257,16 @@ unsafe fn fake_process_event(uobject_address: usize, ufunction_address: usize, p
 
     let process_event: ProcessEvent = unsafe { std::mem::transmute(orig_processevent_addr)};
 
-    if(get_uobject_from_vec_by_address(uobject_address, &gobjects_global).is_some() && get_uobject_from_vec_by_address(uobject_address, &gobjects_global).is_some()){
-        let uobject_name = &get_uobject_from_vec_by_address(uobject_address, &gobjects_global).unwrap().name;
-        let ufunction_name = &get_uobject_from_vec_by_address(ufunction_address, &gobjects_global).unwrap().name;
+    //if(get_uobject_from_vec_by_address(uobject_address, &gobjects_global).is_some() && get_uobject_from_vec_by_address(uobject_address, &gobjects_global).is_some()){
+        //let uobject_name = &get_uobject_from_vec_by_address(uobject_address, &gobjects_global).unwrap().name;
+        //let ufunction_name = &get_uobject_from_vec_by_address(ufunction_address, &gobjects_global).unwrap().name;
 
         //println!("ProcessEvent hook called! UObject {}, UFunction {}, Params addr of {:x}", uobject_name, ufunction_name, params);
-    }
-    else{
+    //}
+    //else{
         //println!("ProcessEvent hook called, but we failed to lookup the UObject/UFunction! UObject addr of {:x}, UFunction addr of {:x}, Params addr of {:x}", uobject_address, ufunction_address, params);
         
-    }
+    //}
 
     return process_event(uobject_address, ufunction_address, params);
     
@@ -376,6 +387,8 @@ unsafe fn fake_engine_exec(game_engine_address: usize, command: usize, f_output_
     engine_addr = game_engine_address;
     foutputdevice = f_output_device;
 
+    //minhook::MinHook::disable_all_hooks();
+
     return engine_call_command(game_engine_address, command, f_output_device);
 
     /*
@@ -446,6 +459,10 @@ struct NavToURLParams{
     returnval: bool
 }
 
+struct TcpLinkListenParams{
+    returnval: u64
+}
+
 /*
 [1dbb895e328] [Core.Function] PlayerController.Engine.ClientTravel
 [1dbb895e460] [Core.StrProperty] ClientTravel.PlayerController.Engine.URL
@@ -469,6 +486,16 @@ struct SendPlayerToURLParams{
     URL: usize
 }
 
+struct SetClassParams{
+    class: usize
+}
+
+struct ServerSelectCharacterParams{
+    character: usize,
+    skin: usize,
+    taunt: usize
+}
+
 /*
 [1f7fa569178] [Engine.WorldInfo] PersistentLevel.TheWorld.MenuMap_P.WorldInfo
 
@@ -477,8 +504,30 @@ struct SendPlayerToURLParams{
 [1f7f87062f8] [Core.BoolProperty] ServerTravel.WorldInfo.Engine.bAbsolute
 [1f7f87063d8] [Core.BoolProperty] ServerTravel.WorldInfo.Engine.bShouldSkipGameNotify */
 
+unsafe fn get_player_controller_address(gnames: *mut TArray, module: Module, gobjects: *mut TArray) -> Option<usize>{
+    gobjects_global = dump_objects(gnames, &module, gobjects);
+
+    for uobject in &gobjects_global{
+        if(uobject.name.contains("PoplarPlayerController") && uobject.name.contains("PersistentLevel.TheWorld") && uobject.class_name == Some("PoplarGame.PoplarPlayerController".to_string())){
+            println!("{}", uobject.name);
+            return Some(uobject.address);
+        }
+    }
+
+    return None;
+}
+
 fn main_thread() {
     println!("ReBorn Injected!");
+
+    println!("Reading config from disk...");
+
+    let mut config_string: String = "".to_string();
+
+    File::open("config.txt").unwrap().read_to_string(&mut config_string);
+
+    println!("{}", config_string);
+
     println!("Waiting for module to become valid...");
     loop{
         if Module::from_name("Battleborn.exe").is_some(){
@@ -526,7 +575,7 @@ fn main_thread() {
 
         println!("Creating ProcessEvent hook...");
 
-        orig_processevent_addr = MinHook::create_hook(process_event as _, fake_process_event as _).unwrap() as usize;
+        //orig_processevent_addr = MinHook::create_hook(process_event as _, fake_process_event as _).unwrap() as usize;
 
         println!("Creating StaticConstructObject reference...");
 
@@ -536,7 +585,7 @@ fn main_thread() {
 
         println!("Creating StaticConstructObject hook...");
 
-        orig_staticcreateobject_addr = MinHook::create_hook(static_construct_object as _, fake_static_construct_object as _).unwrap() as usize;
+        //orig_staticcreateobject_addr = MinHook::create_hook(static_construct_object as _, fake_static_construct_object as _).unwrap() as usize;
 
         println!("Creating EngineCallCommand reference...");
 
@@ -600,12 +649,17 @@ fn main_thread() {
 
         loop{
             /*
-            if(!did_the_funny && engine_addr != 0 && foutputdevice != 0){
-                did_the_funny = true;
-                let command_1 = wchz!("open Wishbone_P");
+            if(engine_addr != 0 && foutputdevice != 0 && detect_keydown!(VirtualKeyCode::VK_P)){
+                let command_1 = wchz!("open Wishbone_P?listen -game");
+                engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
+            }
+
+            if(engine_addr != 0 && foutputdevice != 0 && detect_keydown!(VirtualKeyCode::VK_O)){
+                let command_1 = wchz!("open 10.0.0.85 -game");
                 engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
             }
             */
+            /*
             if(engine_addr != 0 && foutputdevice != 0){
                 print!(">");
 
@@ -615,7 +669,572 @@ fn main_thread() {
 
                 stdin.read_line(&mut command);
 
+                let command_1 = wchz!("open Wishbone_P?listen -game");
+                let command_2 = wchz!("open 10.0.0.85 -game");
+
+                if(command.contains("1")){
+                    println!("Command 1");
+                    engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
+                }
+                else if(command.contains("2")){
+                    println!("Command 2");
+                    engine_call_command(engine_addr, ptr::addr_of!(*command_2) as usize, foutputdevice);
+                }
+            }
+            */
+            if(!did_the_funny && engine_addr != 0 && foutputdevice != 0){
+                did_the_funny = true;
+                match(config_string.split("|").into_iter().collect::<Vec<_>>()[0].to_string().parse::<u32>().unwrap()){
+                    1 => {
+                        let command = wchz!("open PvE_Prologue_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    2 => {
+                        let command = wchz!("open Caverns_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    3 => {
+                        let command = wchz!("open Portal_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    4 => {
+                        let command = wchz!("open Captains_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    5 => {
+                        let command = wchz!("open Evacuation_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    6 => {
+                        let command = wchz!("open Ruins_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    7 => {
+                        let command = wchz!("open Observatory_p");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    8 => {
+                        let command = wchz!("open Refinery_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    9 => {
+                        let command = wchz!("open Cathedral_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    10 => {
+                        let command = wchz!("open Slums_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    11 => {
+                        let command = wchz!("open Toby_Raid_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    12 => {
+                        let command = wchz!("open CullingFacility_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    13 => {
+                        let command = wchz!("open TallTales_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    14 => {
+                        let command = wchz!("open Heart_Ekkunar_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                    _ => {
+                        let command = wchz!("open Dojo_P");
+
+                        engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
+                    }
+                }
+
+                sleep(Duration::from_secs(10));
+                
+                match(config_string.split("|").into_iter().collect::<Vec<_>>()[1].to_string().parse::<u32>().unwrap()){
+                    1 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_WaterMonk.NameId_WaterMonk".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    2 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_SunPriestess.NameId_SunPriestess_Poplar".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    3 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_SoulCollector.NameId_SoulCollector".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    4 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_PlagueBringer.NameId_PlagueBringer".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    5 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_RocketHawk.NameId_RocketHawk".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    6 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_DwarvenWarrior.NameId_DwarvenWarrior".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    7 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_AssaultJump.NameId_AssaultJump_Poplar".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    8 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_DarkAssassin.NameId_DarkAssassin".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    9 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_LeapingLuchador.NameId_LeapingLuchador".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    10 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_Bombirdier.NameId_Bombirdier".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    11 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_Blackguard.NameId_Blackguard".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    12 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_PapaShotgun.NameId_PapaShotgun".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    13 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_SpiritMech.NameId_SpiritMech".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    14 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_IceGolem.NameId_IceGolem".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    15 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_Sidekick.NameId_SideKick".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    16 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_TacticalBuilder.NameId_TacticalBuilder".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    17 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("gd_gentsniper.NameId_GentSniper".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    18 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_MutantFist.NameId_MutantFist".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    19 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("gd_tribalhealer.NameId_TribalHealer".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    20 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("gd_machinegunner.NameId_MachineGunner".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    21 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_ChaosMage.NameId_ChaosMage".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    22 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_ModernSoldier.NameId_ModernSoldier".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    23 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_CornerSneaker.NameId_CornerSneaker".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    24 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_MageBlade.NameId_MageBlade_Poplar".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    25 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("gd_deathblade.NameId_DeathBlade".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    26 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_RogueCommander.NameId_RogueCommander".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    27 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_BoyAndDjinn.NameId_BoyAndDjinn".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    28 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("gd_darkelfranger.NameId_DarkElfRanger".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    29 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_PenguinMech.NameId_PenguinMech".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    30 => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_RogueSoldier.NameId_RogueSoldier".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                    _ => {
+                        let player_controller: usize = get_player_controller_address(gnames, module, gobjects).unwrap();
+
+                        let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                        let class_to_switch_to: usize = get_uobject_from_vec("GD_WaterMonk.NameId_WaterMonk".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                        let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                        process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+
+                        break;
+                    }
+                }
+            }
+            /*
+            if(!did_the_funny && engine_addr != 0 && foutputdevice != 0){
+                did_the_funny = true;
                 let command_1 = wchz!("open Wishbone_P");
+                engine_call_command(engine_addr, ptr::addr_of!(*command_1) as usize, foutputdevice);
+            }
+            */
+            /*
+            if detect_keydown!(VirtualKeyCode::VK_P) {
+                gobjects_global = dump_objects(gnames, &module, gobjects);
+
+                /*
+                [1d25f84c1a0] [Core.Function] PoplarPlayerController.PoplarGame.ServerSelectCharacter
+[1d25f84c2d8] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.SelectedCharacter
+[1d25f84c3b8] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.PreferredSkin
+[1d25f84c498] [Core.ObjectProperty] ServerSelectCharacter.PoplarPlayerController.PoplarGame.PreferredTaunt */
+/*
+                let player_controller: usize = get_uobject_from_vec("PersistentLevel.TheWorld.Cascade_P.PoplarPlayerController".to_owned(), Some("PoplarGame.PoplarPlayerController".to_owned()), &gobjects_global).unwrap().address;
+
+                let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.ServerSelectCharacter".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+                
+                let class_uobject: usize = get_uobject_from_vec("GD_MutantFist.ClassId_MutantFist".to_owned(), Some("PoplarGame.PoplarPlayerClassIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+                //[1868186f9e0] [PoplarGame.PoplarPlayerNameIdentifierDefinition] GD_MutantFist.NameId_MutantFists
+
+                //[2d5671def80] [PoplarGame.PoplarMetaSkinDefinition] Skins.GD_MutantFist.SkinId_Color005
+                let skin_uobject: usize = get_uobject_from_vec("Skins.GD_MutantFist.SkinId_Color005".to_owned(), Some("PoplarGame.PoplarMetaSkinDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                //[2d5671df5e0] [PoplarGame.PoplarMetaTauntDefinition] Taunts.GD_MutantFist.Taunt_MutantFist_Taunt_002
+                let taunt_uobject: usize = get_uobject_from_vec("Taunts.GD_MutantFist.Taunt_MutantFist_Taunt_002".to_owned(), Some("PoplarGame.PoplarMetaTauntDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                let params: ServerSelectCharacterParams = ServerSelectCharacterParams { character: class_uobject, skin: skin_uobject, taunt: taunt_uobject};
+                */
+
+                let player_controller: usize = get_uobject_from_vec("PersistentLevel.TheWorld.Wishbone_P.PoplarPlayerController".to_owned(), Some("PoplarGame.PoplarPlayerController".to_owned()), &gobjects_global).unwrap().address;
+
+                let function_object: usize = get_uobject_from_vec("PoplarPlayerController.PoplarGame.SwitchPoplarPlayerClass".to_owned(), Some("Core.Function".to_owned()), &gobjects_global).unwrap().address;
+
+                let class_to_switch_to: usize = get_uobject_from_vec("GD_DarkAssassin.NameId_DarkAssassin".to_owned(), Some("PoplarGame.PoplarPlayerNameIdentifierDefinition".to_owned()), &gobjects_global).unwrap().address;
+
+                let params: SetClassParams = SetClassParams { class: class_to_switch_to };
+                
+                process_event(player_controller, function_object, ptr::addr_of!(params) as usize);
+            }
+            if(engine_addr != 0 && foutputdevice != 0 && detect_keydown!(VirtualKeyCode::VK_O)){
+                did_the_funny = true;
+                /*
+                print!(">");
+
+                let mut command: String = String::new();
+
+                stdout.flush();
+
+                stdin.read_line(&mut command);
+
+                let command_bytes: Vec<u8> = command.into_bytes();
+
+                let wide_command_bytes: Vec<u16> = command_bytes.iter().map(|byte: &u8| *byte as u16).collect();
+
+                let wide_command_slice: &[u16] = wide_command_bytes.as_slice();
+
+                engine_call_command(engine_addr, command_address.into(), foutputdevice);
+
+
+
+                let command_1 = wchz!("open IncTut_Freeze_P");
                 let command_2 = wchz!("open 10.0.0.85");
 
                 if(command.contains("1")){
@@ -626,7 +1245,18 @@ fn main_thread() {
                     println!("Command 2");
                     engine_call_command(engine_addr, ptr::addr_of!(*command_2) as usize, foutputdevice);
                 }
-                
+
+                [1e74ba843d8] [Core.Function] TcpLink.IpDrv.Listen
+[1e74ba84510] [Core.BoolProperty] Listen.TcpLink.IpDrv.ReturnValue
+
+PoplarGame.Default__PoplarTcpLink
+PoplarGame.PoplarTcpLink
+                                */
+
+                                
+
+                let command = wchz!("open Wishbone_P?listen -game");
+                engine_call_command(engine_addr, ptr::addr_of!(*command) as usize, foutputdevice);
             }
             /*
             if(!did_the_funny && foutputdevice != 0){
@@ -636,6 +1266,7 @@ fn main_thread() {
                 println!("{:x}", ptr::addr_of!(command) as usize);
                 engine_call_command(game_engine_address, ptr::addr_of!(command) as usize, foutputdevice);
             }
+            */
             */
         }
     }

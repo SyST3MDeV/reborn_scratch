@@ -1,0 +1,67 @@
+PvE_Prologue_P - Prologue - Story Mission 0
+Caverns_P - The Algorithm - Story Mission 1
+Portal_P - Void's Edge - Story Mission 2
+Captains_P - The Renegade - Story Mission 3
+Evacuation_P - The Archive - Story Mission 4
+Ruins_P - Sentinel PvE - Story Mission 5
+Observatory_p - The Experiment - Story Mission 6
+Refinery_P - The Sabotuer PvE - Story Mission 7
+Cathedral_P - Heliophage - Story Mission 8
+
+Slums_P - Atticus and the Thrall Rebellion PvE - Operation 1
+Toby_Raid_P - Toby's Friendship Raid PvE - Operation 2
+CullingFacility_P - Oscar Mike vs the Battleschool - Operation 3
+TallTales_P - Montana and the Demon Bear PvE - Operation 4
+Heart_Ekkunar_P - Pheobe and the Heart of Ekkunar - Operation 5
+
+Wishbone_P - Ziggurat PvP - Supercharge
+Viaduct_P - Echelon PvP - Incursion
+Snowdrift_P - Monuments PvP - Incursion
+Snowblind_P - Snowblind PvP - Capture
+Snowblind_Headhunter_P - Snowblind PvP - Face-off
+SlumScort_P - Outskirts PvP - Meltdown
+Skirmish_P - Paradise PvP - Meltdown
+Ripple_P - Horizon PvP - Supercharge
+Ravine_P - Outback PvP - Capture
+Ravine_Headhunter_P - Outback PvP - Face-off
+MenuMap_P - Menu Map - Menu
+Inc_Stronghold2_P - Overgrowth PvP - Incursion
+IncTut_Freeze_P - Tutorial - Incursion
+IceScort_P - Coldsnap PvP - Meltdown
+Ghalt_ChainChainChain_P - Smelter PvP - Tank Yankers
+Dojo_P - Dojo - Dojo
+Cascade_P - Permafrost - Supercharge
+BlissRuins_P - Temples - Capture
+BlissRuins_Headhunter_P - Temples - Face-off
+BENEDICT_Void_P - Aerie - Rocket Brawl
+
+SK_C030_WaterMonk_Full = Alani
+SK_C015_SunPriestess_Full = Ambra
+SK_C018_SoulCollector_Full = Attikus
+SK_C031_PlagueBringer_Full = Beatrix
+SK_C011_RocketSoldier_Full = Benedict
+SK_C013_DwarvenWarrior_Full = Boldur
+SK_C010_AssaultJump_Full = Caldarius
+SK_C026_DarkAssassin_Full = Deande
+SK_C022_LeapingLuchador_Full = El Dragon
+SK_C032_Bombirdier_Full = Ernest
+SK_C019_Blackguard_Full = Galilea
+SK_C024_PapaShotgun_Full = Ghalt
+SK_C017_SpiritMech_Full = ISIC
+SK_C020_IceGolem_Full = Kelvin
+SK_C029_SideKick_Full = Kid Ultra
+SK_C027_TacticalBuilder_Full = Kleese
+SK_C002_GentSniper_Full = Marquis
+SK_C025_MutantFist_Full = Mellka
+SK_C006_TribalHealer_Full = Miko
+SK_C003_MachineGunner_Full = Montana
+SK_C014_ChaosMage_Full = Orendi
+SK_C004_ModernSoldier_Full = Oscar Mike
+SK_C033_CornerSneaker_Full = Pendles
+SK_C012_MageBlade_Fullbody = Phoebe
+SK_C005_Deathblade_Full = Rath
+SK_C007_RogueCommander_Full = Reyna
+SK_C016_BoyAndDjinn_Shayne_Full ALSO SK_C016_BoyAndDjinn_Aurox_Full = Shayne & Aurox*
+SK_C001_DarkElfRanger_Full = Thorn
+SK_C021_PenguinMech_Full = Toby
+SK_C023_RogueSoldier_Full = Whiskey Foxtrot
