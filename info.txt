@@ -65,3 +65,6 @@ SK_C016_BoyAndDjinn_Shayne_Full ALSO SK_C016_BoyAndDjinn_Aurox_Full = Shayne & A
 SK_C001_DarkElfRanger_Full = Thorn
 SK_C021_PenguinMech_Full = Toby
 SK_C023_RogueSoldier_Full = Whiskey Foxtrot
+
+Team IDs:
+2 = spectate

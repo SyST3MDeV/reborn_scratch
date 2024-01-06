@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 minhook = "0.3.0"
+process_list = "0.2.1"
 toy-arms = {git = "https://github.com/pseuxide/toy-arms"}
 wchar = "0.11.0"
 widestring = "1.0.2"
